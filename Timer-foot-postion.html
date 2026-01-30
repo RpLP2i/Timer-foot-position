@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>Timer Foot Position</title>
+<style>
+    body{margin:0;padding:0;background:#111;color:white;font-family:Arial;text-align:center;}
+    .container{max-width:800px;margin:auto;padding:20px;}
+    h1{margin-bottom:20px;}
+    .plan{background:#222;border-radius:10px;padding:14px 20px;text-align:left;margin-bottom:18px;}
+    .row{display:grid;grid-template-columns:140px 60px 80px 80px 80px auto;gap:6px;align-items:center;margin-bottom:6px;}
+    input{width:100%;padding:4px;background:#333;border:1px solid #444;border-radius:4px;color:white;text-align:center;}
+    .btn{padding:10px 16px;border:none;border-radius:8px;margin:6px;cursor:pointer;font-size:1em;}
+    .start{background:#27ae60;} .pause{background:#f39c12;} .resume{background:#2ecc71;} .stop{background:#e74c3c;} .next{background:#3498db;} .add{background:#16a085;} .del{background:#c0392b;}
+    .circle-container{width:260px;height:260px;margin:20px auto;position:relative;}
+    svg{transform:rotate(-90deg);}
+    #timerText{position:absolute;top:50%;left:50%;transform:translate(-50%,-60%);font-size:3em;letter-spacing:2px;font-family:"Digital",monospace;}
+    #phaseLabel{font-size:1.3em;font-weight:bold;margin-top:10px;}
+    #info{font-size:1.1em;margin-top:4px;opacity:.9;}
+    @font-face{font-family:'Digital';src:url(https://fonts.gstatic.com/s/dsdigitaldisplay/v9/fC1hPY5pJ-1AFZt6oDGztCEJ71g.ttf);}
+</style>
+</head>
+<body>
+
+<div class="container">
+<h1>Timer Foot Position</h1>
+
+<div id="plan" class="plan"></div>
+
+<!-- Bouton avec ID ajouté -->
+<button id="addBtn" class="btn add" onclick="addBlock()">+ Ajouter un procédé</button><br>
+<button class="btn start" onclick="startSession()">LANCER SÉANCE</button>
+
+<div id="timerSection" style="display:none;">
+    <div id="phaseLabel"></div>
+    <div id="info"></div>
+    <div class="circle-container">
+        <svg width="260" height="260">
+            <circle cx="130" cy="130" r="120" stroke="#444" stroke-width="12" fill="none"/>
+            <circle id="circle" cx="130" cy="130" r="120" stroke="white" stroke-width="12" fill="none" stroke-linecap="round"/>
+        </svg>
+        <div id="timerText">00:00</div>
+    </div>
+    <button class="btn pause" onclick="pauseTimer()">Pause</button>
+    <button class="btn resume" onclick="resumeTimer()">Reprendre</button>
+    <button class="btn stop" onclick="stopSession()">Stop</button><br>
+    <button id="nextBtn" class="btn next" style="display:none;" onclick="nextBlock()">CONTINUER</button>
+</div>
+</div>
+
+<audio id="bStart" src="https://actions.google.com/sounds/v1/alarms/beep_short.ogg"></audio>
+<audio id="bShort" src="https://actions.google.com/sounds/v1/alarms/beep_short.ogg"></audio>
+
+<!-- SON DE FIN LOCAL -->
+<audio id="bEnd" src="audio/gong.mp3"></audio>
+
+<script>
+let blocks=[
+    {name:"Rondo",series:6,work:90,rest:30,rotate:120},
+    {name:"Rondo",series:8,work:90,rest:10,rotate:120},
+    {name:"Jeu de position",series:5,work:120,rest:30,rotate:120},
+    {name:"Grand jeu",series:4,work:180,rest:30,rotate:0}
+];
+
+function addBlock(){blocks.push({name:"Nouveau",series:1,work:60,rest:30,rotate:0});drawPlan();}
+function delBlock(i){blocks.splice(i,1);drawPlan();}
+function upd(i,key,val){blocks[i][key]=isNaN(val)?val:parseInt(val);drawPlan();}
+function tTot(b){return b.series*(b.work+b.rest)+b.rotate;}
+function fmt(sec){let m=Math.floor(sec/60),s=sec%60;return`${m}′${String(s).padStart(2,'0')}`;}
+
+function drawPlan(){
+    let out=`<div class="row"><b>Nom</b><b>Séries</b><b>Trav</b><b>Récup</b><b>Rot</b><b>Total</b></div>`;
+    let total=0;
+    blocks.forEach((b,i)=>{let sum=tTot(b);total+=sum;
+        out+=`<div class='row'>
+        <input value='${b.name}' onchange="upd(${i},'name',this.value)">
+        <input type='number' value='${b.series}' onchange="upd(${i},'series',this.value)">
+        <input type='number' value='${b.work}' onchange="upd(${i},'work',this.value)">
+        <input type='number' value='${b.rest}' onchange="upd(${i},'rest',this.value)">
+        <input type='number' value='${b.rotate}' onchange="upd(${i},'rotate',this.value)">
+        ${fmt(sum)} <button class='btn del' onclick='delBlock(${i})'>🗑️</button>
+        </div>`;
+    });
+    out+=`<br><b>TOTAL SÉANCE : ${fmt(total)}</b>`;
+    plan.innerHTML=out;
+}
+drawPlan();
+
+/* ==== SEANCE ==== */
+let cb=0,cs=0,phase="",timeLeft=0,interval,paused=false,circ=document.getElementById("circle"),C=2*Math.PI*120;circ.style.strokeDasharray=C;
+
+function playStart(){bStart.play();} 
+function playShort(){bShort.play();} 
+function playEnd(){bEnd.play();}
+
+function startSession(){
+    plan.style.display='none';
+    document.querySelector('.start').style.display='none';
+    document.getElementById('addBtn').style.display='none'; // cache le bouton
+    timerSection.style.display='block';
+    cb=0;
+    launchBlock();
+}
+
+function launchBlock(){cs=0;startWork();}
+function startWork(){phase='work';let b=blocks[cb];timeLeft=b.work;updateUI("TRAVAIL","lightgreen");playStart();kick();}
+function startRest(){phase='rest';let b=blocks[cb];timeLeft=b.rest;updateUI("RÉCUP","red");kick();}
+function startRotate(){phase='rotate';let b=blocks[cb];timeLeft=b.rotate;updateUI("ROTATION","orange");playStart();kick();}
+
+function kick(){paused=false;display();interval=setInterval(tick,1000);}
+
+function tick(){
+    if(paused) return;
+    timeLeft--;
+    display();
+    if(timeLeft<=3 && timeLeft>0)playShort();
+    if(timeLeft<=0){clearInterval(interval);playEnd();nextPhase();}
+}
+
+function nextPhase(){
+    let b=blocks[cb];
+    if(phase==='work'){startRest();}
+    else if(phase==='rest'){
+        cs++;
+        if(cs>=b.series){
+            if(b.rotate>0){startRotate();} else endBlock();
+        } else startWork();
+    } else if(phase==='rotate'){endBlock();}
+}
+
+function endBlock(){
+    phaseLabel.textContent="PROCÉDÉ TERMINÉ";
+    info.textContent="";
+    nextBtn.style.display='inline-block';
+}
+
+function nextBlock(){
+    nextBtn.style.display='none';
+    cb++;
+    if(cb>=blocks.length)finish();
+    else launchBlock();
+}
+
+function finish(){
+    phaseLabel.textContent="SÉANCE TERMINÉE";
+    timerText.textContent="FIN";
+    info.textContent="";
+}
+
+function updateUI(txt,color){
+    let b=blocks[cb];
+    phaseLabel.textContent=b.name+" — "+txt;
+    phaseLabel.style.color=color;
+    info.textContent=`Bloc ${cb+1}/${blocks.length} • Série ${cs+1}/${b.series}`;
+}
+
+function display(){
+    let m=Math.floor(timeLeft/60),s=timeLeft%60;
+    timerText.textContent=`${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+    circ.style.strokeDashoffset=C*(1-timeLeft/(phase==='work'?blocks[cb].work:phase==='rest'?blocks[cb].rest:blocks[cb].rotate));
+}
+
+function pauseTimer(){paused=true;clearInterval(interval);}
+function resumeTimer(){if(paused){paused=false;interval=setInterval(tick,1000);}}
+function stopSession(){location.reload();}
+</script>
+</body>
+</html>
